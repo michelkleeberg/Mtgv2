@@ -280,7 +280,7 @@
     <div id="loader"></div>
     <div id="error">No hay cartas con esos filtros.<br>Ajusta la edición o el rango de años.</div>
   </div>
-  <div id="hint">Toque suave: info de la carta · Mantén presionado a la izquierda o derecha: navegar</div>
+  <div id="hint">Toca el lado izquierdo o derecho para navegar · mantén presionado para ver info</div>
   <div id="info">
     <div class="name" id="info-name"></div>
     <div class="flavor" id="info-flavor"></div>
@@ -552,22 +552,45 @@
   }
 
   var pressTimer = null;
-  var firmPress = false;
-  var HOLD_MS = 420;
+  var longPressed = false;
+  var HOLD_MS = 350;
+
+  // Track how many fingers are on screen. While pinching (2+ fingers),
+  // suppress tap/hold navigation so zoom doesn't accidentally change the card.
+  var activePointers = new Set();
+  var multiTouch = false;
+  document.addEventListener('pointerdown', function (e) {
+    activePointers.add(e.pointerId);
+    if (activePointers.size > 1) {
+      multiTouch = true;
+      clearTimeout(pressTimer);
+    }
+  }, true);
+  function releasePointer(e) {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size === 0) {
+      setTimeout(function () { multiTouch = false; }, 250);
+    }
+  }
+  document.addEventListener('pointerup', releasePointer, true);
+  document.addEventListener('pointercancel', releasePointer, true);
 
   function attachZone(zone, action) {
     zone.addEventListener('pointerdown', function () {
-      firmPress = false;
+      if (multiTouch) return;
+      longPressed = false;
       pressTimer = setTimeout(function () {
-        firmPress = true;
-        toggleInfo(false);
-        action();
+        longPressed = true;
+        toggleInfo(true);
       }, HOLD_MS);
     });
     zone.addEventListener('pointerup', function () {
       clearTimeout(pressTimer);
-      if (!firmPress) {
-        toggleInfo(!info.classList.contains('show'));
+      if (multiTouch) return;
+      if (info.classList.contains('show')) {
+        toggleInfo(false);
+      } else if (!longPressed) {
+        action();
       }
     });
     zone.addEventListener('pointerleave', function () {
