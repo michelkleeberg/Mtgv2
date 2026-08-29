@@ -159,6 +159,64 @@
   }
   #download-btn:active { background: rgba(255,255,255,0.14); color: #fff; }
 
+  #hd-btn {
+    position: fixed;
+    top: calc(14px + env(safe-area-inset-top));
+    right: 98px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.55);
+    font-size: 17px;
+    z-index: 20;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  #hd-btn:active { background: rgba(255,255,255,0.14); color: #fff; }
+
+  #hd-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.92);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  #hd-overlay.show { opacity: 1; pointer-events: auto; }
+  #hd-img {
+    max-width: 92vw;
+    max-height: 85vh;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 6px;
+  }
+  #hd-close {
+    position: fixed;
+    top: calc(14px + env(safe-area-inset-top));
+    right: 14px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #fff;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 51;
+  }
+  #hd-close:active { background: rgba(255,255,255,0.2); }
+
   .edge-zone {
     position: fixed;
     top: 0;
@@ -167,7 +225,7 @@
     z-index: 15;
   }
   #zone-prev { left: 0; width: 20%; }
-  #zone-next { left: 20%; right: 0; width: auto; }
+  #zone-next { right: 0; width: 20%; left: auto; }
 
   .edge-icon {
     position: fixed;
@@ -280,7 +338,7 @@
     <div id="loader"></div>
     <div id="error">No hay cartas con esos filtros.<br>Ajusta la edición o el rango de años.</div>
   </div>
-  <div id="hint">Toca el lado izquierdo o derecho para navegar · mantén presionado para ver info</div>
+  <div id="hint">Toque corto: info · Mantén presionado en el borde izq/der: cambiar carta</div>
   <div id="info">
     <div class="name" id="info-name"></div>
     <div class="flavor" id="info-flavor"></div>
@@ -288,7 +346,13 @@
   </div>
 
   <a id="download-btn" aria-label="Descargar imagen" target="_blank" rel="noopener noreferrer">⬇</a>
+  <button id="hd-btn" aria-label="Ver carta completa en HD">ⓘ</button>
   <button id="settings-btn" aria-label="Configuración">⚙</button>
+
+  <div id="hd-overlay">
+    <img id="hd-img" alt="">
+    <button id="hd-close" aria-label="Cerrar">×</button>
+  </div>
   <div id="zone-prev" class="edge-zone"></div>
   <div id="zone-next" class="edge-zone"></div>
   <div id="icon-prev" class="edge-icon disabled">‹</div>
@@ -338,6 +402,10 @@
 
   var settingsBtn = document.getElementById('settings-btn');
   var downloadBtn = document.getElementById('download-btn');
+  var hdBtn = document.getElementById('hd-btn');
+  var hdOverlay = document.getElementById('hd-overlay');
+  var hdImg = document.getElementById('hd-img');
+  var hdClose = document.getElementById('hd-close');
   var zonePrev = document.getElementById('zone-prev');
   var zoneNext = document.getElementById('zone-next');
   var iconPrev = document.getElementById('icon-prev');
@@ -451,6 +519,20 @@
     return '';
   }
 
+  function pickFullCardUrl(card) {
+    // Prefers png (Scryfall's highest-resolution image) of the entire card, not just the art crop.
+    if (card.image_uris) {
+      return card.image_uris.png || card.image_uris.large || card.image_uris.normal;
+    }
+    if (card.card_faces && card.card_faces.length) {
+      var face = card.card_faces.find(function (f) { return f.image_uris; });
+      if (face) {
+        return face.image_uris.png || face.image_uris.large || face.image_uris.normal;
+      }
+    }
+    return null;
+  }
+
   var history = [];
   var historyIndex = -1;
 
@@ -505,6 +587,7 @@
         var flavor = pickFlavorText(card);
         var entry = {
           imgUrl: imgUrl,
+          fullCardUrl: pickFullCardUrl(card),
           name: card.name + (card.mana_cost ? '  ' + card.mana_cost : ''),
           flavor: flavor ? '"' + flavor.replace(/\n/g, ' ') + '"' : '',
           meta: (card.set_name || '') + (card.artist ? ' · Art by ' + card.artist : '')
@@ -514,11 +597,39 @@
         history.push(entry);
         historyIndex = history.length - 1;
         renderEntry(entry);
+        translateFlavorToSpanish(card, entry);
       })
       .catch(function () {
         loading = false;
         loader.classList.remove('show');
         errorEl.classList.add('show');
+      });
+  }
+
+  function translateFlavorToSpanish(card, entry) {
+    if (!card.oracle_id) return;
+    var q = 'oracleid:' + card.oracle_id + ' lang:es';
+    var url = 'https://api.scryfall.com/cards/search?order=released&unique=prints&q=' + encodeURIComponent(q);
+
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('no es prints');
+        return res.json();
+      })
+      .then(function (data) {
+        var prints = (data && data.data) || [];
+        var withFlavor = prints.find(function (c) { return pickFlavorText(c); });
+        var esFlavor = withFlavor ? pickFlavorText(withFlavor) : null;
+        if (!esFlavor) return;
+        entry.flavor = '"' + esFlavor.replace(/\n/g, ' ') + '"';
+        // If this card is still the one on screen, update it live.
+        if (history[historyIndex] === entry) {
+          infoFlavor.textContent = entry.flavor;
+          infoFlavor.style.display = '';
+        }
+      })
+      .catch(function () {
+        // No hay impresión en español o falló la búsqueda: se conserva el flavor text original.
       });
   }
 
@@ -581,16 +692,14 @@
       longPressed = false;
       pressTimer = setTimeout(function () {
         longPressed = true;
-        toggleInfo(true);
+        action();
       }, HOLD_MS);
     });
     zone.addEventListener('pointerup', function () {
       clearTimeout(pressTimer);
       if (multiTouch) return;
-      if (info.classList.contains('show')) {
-        toggleInfo(false);
-      } else if (!longPressed) {
-        action();
+      if (!longPressed) {
+        toggleInfo(!info.classList.contains('show'));
       }
     });
     zone.addEventListener('pointerleave', function () {
@@ -602,6 +711,28 @@
   attachZone(zoneNext, goNext);
 
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // HD full-card modal
+  function openHD() {
+    var entry = history[historyIndex];
+    if (!entry || !entry.fullCardUrl) return;
+    hdImg.src = entry.fullCardUrl;
+    hdOverlay.classList.add('show');
+  }
+  function closeHD() {
+    hdOverlay.classList.remove('show');
+  }
+  hdBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    openHD();
+  });
+  hdClose.addEventListener('click', function (e) {
+    e.stopPropagation();
+    closeHD();
+  });
+  hdOverlay.addEventListener('click', function (e) {
+    if (e.target === hdOverlay) closeHD();
+  });
 
   // Settings panel
   function openPanel() {
