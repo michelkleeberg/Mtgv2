@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<title>MTG Art Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital@1&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  }
+  #stage {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+  #art {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  #art.loaded { opacity: 1; }
+
+  #loader {
+    position: absolute;
+    width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,0.15);
+    border-top-color: rgba(255,255,255,0.6);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+  #loader.show { opacity: 1; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #info {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, rgba(0,0,0,0.85), transparent);
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: none;
+  }
+  #info.show { opacity: 1; transform: translateY(0); }
+  #info .name { font-size: 15px; font-weight: 600; color: #fff; }
+  #info .flavor {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-style: italic;
+    font-size: 14px;
+    line-height: 1.4;
+    color: rgba(255,255,255,0.45);
+    margin: 4px 0 2px;
+    max-width: 92%;
+  }
+  #info .meta { font-size: 12px; color: rgba(255,255,255,0.55); }
+
+  #hint {
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top));
+    left: 0; right: 0;
+    text-align: center;
+    color: rgba(255,255,255,0.35);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+  }
+  #hint.hide { opacity: 0; }
+
+  #error {
+    position: fixed;
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+    text-align: center;
+    padding: 0 24px;
+    display: none;
+    line-height: 1.5;
+  }
+  #error.show { display: block; }
+
+  /* Settings gear */
+  #settings-btn {
+    position: fixed;
+    top: calc(14px + env(safe-area-inset-top));
+    right: 14px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.55);
+    font-size: 16px;
+    z-index: 20;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+  #settings-btn:active { background: rgba(255,255,255,0.14); color: #fff; }
+
+  .nav-btn {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.45);
+    font-size: 20px;
+    z-index: 20;
+    transition: background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+  }
+  .nav-btn:active { background: rgba(255,255,255,0.14); color: #fff; }
+  .nav-btn.disabled { opacity: 0.25; pointer-events: none; }
+  #prev-btn { left: 12px; }
+  #next-btn { right: 12px; }
+
+  /* Settings panel */
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    z-index: 30;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  #overlay.show { opacity: 1; pointer-events: auto; }
+
+  #panel {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    background: #0d0d0d;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px 18px 0 0;
+    padding: 22px 20px calc(24px + env(safe-area-inset-bottom));
+    z-index: 31;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  #panel.show { transform: translateY(0); }
+
+  #panel h2 {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  #panel .sub {
+    color: rgba(255,255,255,0.4);
+    font-size: 12px;
+    margin-bottom: 20px;
+  }
+  .field { margin-bottom: 18px; }
+  .field label {
+    display: block;
+    color: rgba(255,255,255,0.6);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .field input[type="text"], .field input[type="number"] {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 11px 12px;
+    color: #fff;
+    font-size: 15px;
+    outline: none;
+  }
+  .field input::placeholder { color: rgba(255,255,255,0.3); }
+  .field input:focus { border-color: rgba(255,255,255,0.35); }
+
+  .year-row { display: flex; gap: 10px; align-items: center; }
+  .year-row input { flex: 1; }
+  .year-row span { color: rgba(255,255,255,0.35); font-size: 13px; }
+
+  .btn-row { display: flex; gap: 10px; margin-top: 4px; }
+  .btn {
+    flex: 1;
+    padding: 13px;
+    border-radius: 10px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .btn-primary { background: #fff; color: #000; }
+  .btn-primary:active { background: rgba(255,255,255,0.85); }
+  .btn-secondary { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); }
+  .btn-secondary:active { background: rgba(255,255,255,0.15); }
+
+  #active-filters {
+    color: rgba(255,255,255,0.35);
+    font-size: 11px;
+    margin-top: 4px;
+    min-height: 14px;
+  }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <img id="art" alt="">
+    <div id="loader"></div>
+    <div id="error">No hay cartas con esos filtros.<br>Ajusta la edición o el rango de años.</div>
+  </div>
+  <div id="hint">Toca o usa ‹ › para navegar · mantén presionado para ver info</div>
+  <div id="info">
+    <div class="name" id="info-name"></div>
+    <div class="flavor" id="info-flavor"></div>
+    <div class="meta" id="info-meta"></div>
+  </div>
+
+  <button id="settings-btn" aria-label="Configuración">⚙</button>
+  <button id="prev-btn" class="nav-btn disabled" aria-label="Anterior">‹</button>
+  <button id="next-btn" class="nav-btn" aria-label="Siguiente">›</button>
+
+  <div id="overlay"></div>
+  <div id="panel">
+    <h2>Filtros</h2>
+    <div class="sub">Deja los campos vacíos para no filtrar.</div>
+
+    <div class="field">
+      <label for="sets-input">Ediciones (código Scryfall, separadas por coma)</label>
+      <input type="text" id="sets-input" placeholder="ej: khm, war, znr">
+    </div>
+
+    <div class="field">
+      <label>Rango de años</label>
+      <div class="year-row">
+        <input type="number" id="year-from" placeholder="Desde" inputmode="numeric">
+        <span>—</span>
+        <input type="number" id="year-to" placeholder="Hasta" inputmode="numeric">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="keywords-input">Palabras clave (busca en el texto de la carta)</label>
+      <input type="text" id="keywords-input" placeholder="ej: phyrexian, vampire">
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="clear-btn">Clean</button>
+      <button class="btn btn-primary" id="apply-btn">Aplicar</button>
+    </div>
+    <div id="active-filters"></div>
+  </div>
+
+<script>
+(function () {
+  var art = document.getElementById('art');
+  var loader = document.getElementById('loader');
+  var errorEl = document.getElementById('error');
+  var hint = document.getElementById('hint');
+  var info = document.getElementById('info');
+  var infoName = document.getElementById('info-name');
+  var infoFlavor = document.getElementById('info-flavor');
+  var infoMeta = document.getElementById('info-meta');
+
+  var settingsBtn = document.getElementById('settings-btn');
+  var prevBtn = document.getElementById('prev-btn');
+  var nextBtn = document.getElementById('next-btn');
+  var overlay = document.getElementById('overlay');
+  var panel = document.getElementById('panel');
+  var setsInput = document.getElementById('sets-input');
+  var yearFrom = document.getElementById('year-from');
+  var yearTo = document.getElementById('year-to');
+  var keywordsInput = document.getElementById('keywords-input');
+  var applyBtn = document.getElementById('apply-btn');
+  var clearBtn = document.getElementById('clear-btn');
+  var activeFiltersEl = document.getElementById('active-filters');
+
+  var STORAGE_KEY = 'mtg-viewer-filters';
+  var loading = false;
+
+  var DEFAULT_FILTERS = { sets: '', yearFrom: '', yearTo: '', keywords: '' };
+
+  function loadFilters() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      var parsed = raw ? JSON.parse(raw) : {};
+      return {
+        sets: parsed.sets || '',
+        yearFrom: parsed.yearFrom || '',
+        yearTo: parsed.yearTo || '',
+        keywords: parsed.keywords || ''
+      };
+    } catch (e) {
+      return Object.assign({}, DEFAULT_FILTERS);
+    }
+  }
+
+  function saveFilters(f) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(f)); } catch (e) {}
+  }
+
+  function currentFilters() {
+    return {
+      sets: setsInput.value.trim(),
+      yearFrom: yearFrom.value.trim(),
+      yearTo: yearTo.value.trim(),
+      keywords: keywordsInput.value.trim()
+    };
+  }
+
+  function applyFiltersToInputs(f) {
+    setsInput.value = f.sets || '';
+    yearFrom.value = f.yearFrom || '';
+    yearTo.value = f.yearTo || '';
+    keywordsInput.value = f.keywords || '';
+  }
+
+  function buildQuery(f) {
+    var parts = [];
+    if (f.sets) {
+      var codes = f.sets.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+      if (codes.length) {
+        var setQuery = codes.map(function (c) { return 'e:' + c; }).join(' or ');
+        parts.push(codes.length > 1 ? '(' + setQuery + ')' : setQuery);
+      }
+    }
+    if (f.yearFrom) parts.push('year>=' + f.yearFrom);
+    if (f.yearTo) parts.push('year<=' + f.yearTo);
+    if (f.keywords) {
+      var words = f.keywords.split(',').map(function (w) { return w.trim(); }).filter(Boolean);
+      if (words.length) {
+        var wordQuery = words.map(function (w) { return 'o:"' + w.replace(/"/g, '') + '"'; }).join(' or ');
+        parts.push(words.length > 1 ? '(' + wordQuery + ')' : wordQuery);
+      }
+    }
+    return parts.join(' ');
+  }
+
+  function describeFilters(f) {
+    var bits = [];
+    if (f.sets) bits.push(f.sets.split(',').map(function (s) { return s.trim().toUpperCase(); }).join(', '));
+    if (f.yearFrom || f.yearTo) bits.push((f.yearFrom || '…') + '–' + (f.yearTo || '…'));
+    if (f.keywords) bits.push(f.keywords.split(',').map(function (w) { return w.trim(); }).join(', '));
+    return bits.length ? bits.join(' · ') : '';
+  }
+
+  function hideHintSoon() {
+    setTimeout(function () { hint.classList.add('hide'); }, 3000);
+  }
+
+  function pickImageUrl(card) {
+    if (card.image_uris) {
+      return card.image_uris.art_crop || card.image_uris.large || card.image_uris.normal || card.image_uris.png;
+    }
+    if (card.card_faces && card.card_faces.length) {
+      var face = card.card_faces.find(function (f) { return f.image_uris; });
+      if (face) {
+        return face.image_uris.art_crop || face.image_uris.large || face.image_uris.normal;
+      }
+    }
+    return null;
+  }
+
+  function pickFlavorText(card) {
+    if (card.flavor_text) return card.flavor_text;
+    if (card.card_faces && card.card_faces.length) {
+      var face = card.card_faces.find(function (f) { return f.flavor_text; });
+      if (face) return face.flavor_text;
+    }
+    return '';
+  }
+
+  var history = [];
+  var historyIndex = -1;
+
+  function renderEntry(entry) {
+    art.classList.remove('loaded');
+    var img = new Image();
+    img.onload = function () {
+      art.src = entry.imgUrl;
+      art.classList.add('loaded');
+      loader.classList.remove('show');
+      infoName.textContent = entry.name;
+      infoFlavor.textContent = entry.flavor;
+      infoFlavor.style.display = entry.flavor ? '' : 'none';
+      infoMeta.textContent = entry.meta;
+      loading = false;
+      updateNavButtons();
+    };
+    img.onerror = function () {
+      loading = false;
+      updateNavButtons();
+    };
+    img.src = entry.imgUrl;
+  }
+
+  function updateNavButtons() {
+    prevBtn.classList.toggle('disabled', historyIndex <= 0);
+  }
+
+  function fetchNext() {
+    if (loading) return;
+    loading = true;
+    errorEl.classList.remove('show');
+    loader.classList.add('show');
+    art.classList.remove('loaded');
+
+    var filters = loadFilters();
+    var query = buildQuery(filters);
+    var url = 'https://api.scryfall.com/cards/random' + (query ? '?q=' + encodeURIComponent(query) : '');
+
+    fetch(url)
+      .then(function (res) {
+        if (!res.ok) throw new Error('Scryfall error ' + res.status);
+        return res.json();
+      })
+      .then(function (card) {
+        var imgUrl = pickImageUrl(card);
+        if (!imgUrl) {
+          loading = false;
+          return fetchNext();
+        }
+        var flavor = pickFlavorText(card);
+        var entry = {
+          imgUrl: imgUrl,
+          name: card.name + (card.mana_cost ? '  ' + card.mana_cost : ''),
+          flavor: flavor ? '"' + flavor.replace(/\n/g, ' ') + '"' : '',
+          meta: (card.set_name || '') + (card.artist ? ' · Art by ' + card.artist : '')
+        };
+        // Discard any "forward" history if we branched off after going back.
+        history = history.slice(0, historyIndex + 1);
+        history.push(entry);
+        historyIndex = history.length - 1;
+        renderEntry(entry);
+      })
+      .catch(function () {
+        loading = false;
+        loader.classList.remove('show');
+        errorEl.classList.add('show');
+      });
+  }
+
+  function goNext() {
+    if (historyIndex < history.length - 1) {
+      historyIndex++;
+      loader.classList.add('show');
+      renderEntry(history[historyIndex]);
+    } else {
+      fetchNext();
+    }
+  }
+
+  function goPrev() {
+    if (historyIndex > 0) {
+      historyIndex--;
+      loader.classList.add('show');
+      renderEntry(history[historyIndex]);
+    }
+  }
+
+  function resetHistoryAndLoad() {
+    history = [];
+    historyIndex = -1;
+    updateNavButtons();
+    fetchNext();
+  }
+
+  function toggleInfo(show) {
+    info.classList.toggle('show', show);
+  }
+
+  var pressTimer = null;
+  document.getElementById('stage').addEventListener('pointerdown', function () {
+    pressTimer = setTimeout(function () { toggleInfo(true); }, 350);
+  });
+  document.getElementById('stage').addEventListener('pointerup', function () {
+    clearTimeout(pressTimer);
+    if (info.classList.contains('show')) {
+      toggleInfo(false);
+    } else {
+      goNext();
+    }
+  });
+  document.getElementById('stage').addEventListener('pointerleave', function () {
+    clearTimeout(pressTimer);
+  });
+
+  prevBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    goPrev();
+  });
+  nextBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    goNext();
+  });
+
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // Settings panel
+  function openPanel() {
+    applyFiltersToInputs(loadFilters());
+    overlay.classList.add('show');
+    panel.classList.add('show');
+  }
+  function closePanel() {
+    overlay.classList.remove('show');
+    panel.classList.remove('show');
+  }
+
+  settingsBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    openPanel();
+  });
+  overlay.addEventListener('click', closePanel);
+  panel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  applyBtn.addEventListener('click', function () {
+    var f = currentFilters();
+    saveFilters(f);
+    activeFiltersEl.textContent = describeFilters(f);
+    closePanel();
+    resetHistoryAndLoad();
+  });
+
+  clearBtn.addEventListener('click', function () {
+    var empty = Object.assign({}, DEFAULT_FILTERS);
+    applyFiltersToInputs(empty);
+    saveFilters(empty);
+    activeFiltersEl.textContent = '';
+    closePanel();
+    resetHistoryAndLoad();
+  });
+
+  // Init
+  applyFiltersToInputs(loadFilters());
+  activeFiltersEl.textContent = describeFilters(loadFilters());
+  updateNavButtons();
+  hideHintSoon();
+  fetchNext();
+})();
+</script>
+</body>
+</html>
